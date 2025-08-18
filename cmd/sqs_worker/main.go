@@ -7,12 +7,12 @@ import (
 	"syscall"
 	"time"
 
-	awsv1 "github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"go.uber.org/zap"
 
 	"aws_stuff/internal/aws"
@@ -30,16 +30,16 @@ func main() {
 	log, _ := logger.New(cfg.Environment)
 	defer log.Sync()
 
-	sess, baseCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
+	awsCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
 	if err != nil {
-		log.Fatal("failed to create aws session", zap.Error(err))
+		log.Fatal("failed to load aws config", zap.Error(err))
 	}
 
-	db := dynamodb.New(sess, baseCfg)
-	sqsClient := sqs.New(sess, baseCfg)
-	snsClient := sns.New(sess, baseCfg)
-	s3Client := s3.New(sess, baseCfg)
-	cwClient := cloudwatch.New(sess, baseCfg)
+	db := dynamodb.NewFromConfig(awsCfg)
+	sqsClient := sqs.NewFromConfig(awsCfg)
+	snsClient := sns.NewFromConfig(awsCfg)
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) { o.UsePathStyle = true })
+	cwClient := cloudwatch.NewFromConfig(awsCfg)
 
 	dynamoRepo := repository.NewDynamoRepo(db, cfg.DynamoTable, cfg.DynamoReplicaTable)
 	sqsRepo := repository.NewSQSRepo(sqsClient)
@@ -85,11 +85,11 @@ func main() {
 			if m.Body == nil || m.ReceiptHandle == nil {
 				continue
 			}
-			if err := processor.HandleSQS(ctx, awsv1.StringValue(m.Body)); err != nil {
+			if err := processor.HandleSQS(ctx, awsv2.ToString(m.Body)); err != nil {
 				log.Error("process sqs", zap.Error(err))
 				continue
 			}
-			_ = sqsRepo.Delete(ctx, queueURL, awsv1.StringValue(m.ReceiptHandle))
+			_ = sqsRepo.Delete(ctx, queueURL, awsv2.ToString(m.ReceiptHandle))
 		}
 	}
 }

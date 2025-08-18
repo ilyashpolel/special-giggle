@@ -11,6 +11,6 @@ func (s *ProcessorService) SaveItem(ctx context.Context, item models.Item) error
 }
 
 // For demo, retrieving count via ScanCount to validate connectivity
-func (s *ProcessorService) CountItems(ctx context.Context) (int64, error) {
+func (s *ProcessorService) CountItems(ctx context.Context) (int32, error) {
 	return s.dynamo.ScanCount(ctx)
 }

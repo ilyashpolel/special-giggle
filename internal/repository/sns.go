@@ -3,20 +3,20 @@ package repository
 import (
 	"context"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/sns"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
 )
 
 type SNSRepo struct {
-	client *sns.SNS
+	client *sns.Client
 }
 
-func NewSNSRepo(client *sns.SNS) *SNSRepo {
+func NewSNSRepo(client *sns.Client) *SNSRepo {
 	return &SNSRepo{client: client}
 }
 
 func (r *SNSRepo) Publish(ctx context.Context, topicARN string, message string) error {
-	_, err := r.client.PublishWithContext(ctx, &sns.PublishInput{
+	_, err := r.client.Publish(ctx, &sns.PublishInput{
 		TopicArn: aws.String(topicARN),
 		Message:  aws.String(message),
 	})

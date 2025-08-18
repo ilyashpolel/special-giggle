@@ -2,21 +2,20 @@ package repository
 
 import (
 	"context"
-
-	"github.com/aws/aws-sdk-go/service/dynamodbstreams"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
 	"aws_stuff/pkg/models"
+	"github.com/aws/aws-sdk-go/service/dynamodbstreams"
 )
 
 type DynamoRepository interface {
 	PutItem(ctx context.Context, item models.Item) error
-	ScanCount(ctx context.Context) (int64, error)
+	ScanCount(ctx context.Context) (int32, error)
 	ReplicateItem(ctx context.Context, item models.Item) error
 }
 
 type SQSRepository interface {
-	Receive(ctx context.Context, queueURL string, maxMessages int64, visibilityTimeoutSeconds int64, waitTimeSeconds int64) ([]*sqs.Message, error)
+	Receive(ctx context.Context, queueURL string, maxMessages int32, visibilityTimeoutSeconds int32, waitTimeSeconds int32) ([]types.Message, error)
 	Delete(ctx context.Context, queueURL string, receiptHandle string) error
 	Send(ctx context.Context, queueURL string, body string) error
 }
