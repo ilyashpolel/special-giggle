@@ -1,27 +1,53 @@
 SHELL := /usr/bin/env bash
+APP := aws-stuff
 
-.PHONY: test lint build coverage run docker-up docker-down tools
+.PHONY: all build test lint run generate tools docker-up docker-down coverage lambda-build
 
-test:
-	$(MAKE) -C aws_stuff test
-
-lint:
-	$(MAKE) -C aws_stuff lint
+all: lint test build
 
 build:
-	$(MAKE) -C aws_stuff build
+	go build ./...
+
+lint:
+	golangci-lint run ./...
 
 coverage:
-	$(MAKE) -C aws_stuff coverage
+	go test ./... -coverprofile=coverage.out -covermode=atomic
+	go tool cover -func=coverage.out
 
+# Run a specific command (e.g., make run CMD=cmd/sqs_worker)
 run:
-	$(MAKE) -C aws_stuff run CMD="$(CMD)"
+	@if [ -z "$(CMD)" ]; then echo "Usage: make run CMD=cmd/sqs_worker"; exit 1; fi
+	go run $(CMD)
 
-docker-up:
-	$(MAKE) -C aws_stuff docker-up
-
-docker-down:
-	$(MAKE) -C aws_stuff docker-down
+generate:
+	go generate ./...
 
 tools:
-	$(MAKE) -C aws_stuff tools 
+	go install github.com/golang/mock/mockgen@v1.6.0
+	go install github.com/segmentio/golines@latest
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down -v
+
+.PHONY: test
+# RUN_INTEGRATION_TESTS=1 to include -tags=integration
+# Example: make test RUN_INTEGRATION_TESTS=1
+TEST_TAGS :=
+ifdef RUN_INTEGRATION_TESTS
+TEST_TAGS := -tags=integration
+endif
+
+test:
+	go test $(TEST_TAGS) ./... -v -cover
+
+lambda-build:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/lambda-sqs ./cmd/lambda/sqs
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/lambda-sns ./cmd/lambda/sns
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/lambda-s3 ./cmd/lambda/s3
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/lambda-cron ./cmd/lambda/cron
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/lambda-streams ./cmd/lambda/streams 

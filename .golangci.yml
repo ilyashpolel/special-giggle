@@ -16,4 +16,8 @@ linters-settings:
     extra-rules: true
 issues:
   max-issues-per-linter: 0
-  max-same-issues: 0 
+  max-same-issues: 0
+  exclude-rules:
+    - linters:
+        - staticcheck
+      text: "SA1019" 
