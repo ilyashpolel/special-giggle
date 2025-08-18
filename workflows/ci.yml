@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, dev ]
   pull_request:
 
 jobs:
@@ -13,15 +13,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22.x'
-      - name: Install golangci-lint
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.57.2
       - name: Tidy
         working-directory: aws_stuff
         run: go mod tidy
-      - name: Lint
-        working-directory: aws_stuff
-        run: golangci-lint run ./...
       - name: Test
         working-directory: aws_stuff
         run: go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic

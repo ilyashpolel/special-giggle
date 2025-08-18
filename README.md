@@ -1,3 +1,13 @@
+# TASK
+
+**Goal:** Completely rewrite the project to use **AWS SDK for Go v2** instead of v1.  
+- Create a new branch: `feature/aws-sdk-update`  
+- Update all repository layers (`repository/`) and AWS sessions to use SDK v2.  
+- Ensure all services (`service/`) work with the new SDK.  
+- Update tests (unit and integration) for compatibility with SDK v2.  
+- After completion, open a **pull request to `dev`** for review.  
+
+
 # AWS Events Playground (Go, aws-sdk-go v1)
 
 A teaching project demonstrating event-driven processing on AWS using Go and the official v1 SDK:
