@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  localstack:
+    image: localstack/localstack:2.3
+    container_name: aws_stuff_localstack
+    ports:
+      - "4566:4566"
+      - "4571:4571"
+    environment:
+      - SERVICES=s3,sqs,sns,dynamodb,cloudwatch,logs,sts,iam,lambda
+      - DEFAULT_REGION=us-east-1
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./.localstack:/var/lib/localstack" 
