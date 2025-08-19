@@ -1,4 +1,4 @@
-//go:build integration
+////go:build integration
 
 package integration
 
@@ -38,7 +38,7 @@ func requireIntegration(t *testing.T) {
 	}
 }
 
-func newLocalstackConfig(t *testing.T) awsv2.Config {
+func newLocalstackConfig(t *testing.T) (awsv2.Config, error) {
 	region := getenv("AWS_REGION", "us-east-1")
 	endpoint := getenv("LOCALSTACK_ENDPOINT", "http://localhost:4566")
 
@@ -57,9 +57,10 @@ func newLocalstackConfig(t *testing.T) awsv2.Config {
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
 	)
 	if err != nil {
-		t.Fatalf("aws config: %v", err)
+		t.Fatalf("aws config (cfg=%+v): %v", cfg, err)
 	}
-	return cfg
+
+	return cfg, err
 }
 
 func getenv(k, def string) string {
@@ -72,7 +73,10 @@ func getenv(k, def string) string {
 func Test_EndToEnd(t *testing.T) {
 	requireIntegration(t)
 	ctx := context.Background()
-	awsCfg := newLocalstackConfig(t)
+	awsCfg, err := newLocalstackConfig(t)
+	if err != nil {
+		t.Fatalf("failed to load aws config(awsCfg=%+v): %v", awsCfg, err)
+	}
 
 	// Clients
 	db := dynamodb.NewFromConfig(awsCfg)
