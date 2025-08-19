@@ -1,4 +1,4 @@
-////go:build integration
+//go:build integration
 
 package integration
 
@@ -70,7 +70,7 @@ func getenv(k, def string) string {
 }
 
 func Test_EndToEnd(t *testing.T) {
-	//requireIntegration(t)
+	requireIntegration(t)
 	ctx := context.Background()
 	awsCfg := newLocalstackConfig(t)
 
