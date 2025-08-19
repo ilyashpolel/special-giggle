@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"time"
 
-	awsv1 "github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"go.uber.org/zap"
 
 	"aws_stuff/internal/aws"
@@ -38,16 +38,16 @@ func main() {
 	log, _ := logger.New(cfg.Environment)
 	defer log.Sync()
 
-	sess, baseCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
+	awsCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
 	if err != nil {
-		log.Fatal("aws session", zap.Error(err))
+		log.Fatal("aws config", zap.Error(err))
 	}
 
-	db := dynamodb.New(sess, baseCfg)
-	sqsClient := sqs.New(sess, baseCfg)
-	snsClient := sns.New(sess, baseCfg)
-	s3Client := s3.New(sess, baseCfg)
-	cwClient := cloudwatch.New(sess, baseCfg)
+	db := dynamodb.NewFromConfig(awsCfg)
+	sqsClient := sqs.NewFromConfig(awsCfg)
+	snsClient := sns.NewFromConfig(awsCfg)
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) { o.UsePathStyle = true })
+	cwClient := cloudwatch.NewFromConfig(awsCfg)
 
 	processor := service.NewProcessorService(
 		log,
@@ -95,15 +95,15 @@ func main() {
 				continue
 			}
 			var env snsEnvelope
-			if err := json.Unmarshal([]byte(awsv1.StringValue(m.Body)), &env); err != nil {
+			if err := json.Unmarshal([]byte(awsv2.ToString(m.Body)), &env); err != nil {
 				log.Error("parse sns envelope", zap.Error(err))
-				_ = sqsRepo.Delete(ctx, inQueue, awsv1.StringValue(m.ReceiptHandle))
+				_ = sqsRepo.Delete(ctx, inQueue, awsv2.ToString(m.ReceiptHandle))
 				continue
 			}
 			if err := processor.HandleSNS(ctx, env.Message, outQueue); err != nil {
 				log.Error("process sns", zap.Error(err))
 			}
-			_ = sqsRepo.Delete(ctx, inQueue, awsv1.StringValue(m.ReceiptHandle))
+			_ = sqsRepo.Delete(ctx, inQueue, awsv2.ToString(m.ReceiptHandle))
 		}
 	}
 }

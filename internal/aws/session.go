@@ -1,30 +1,39 @@
 package aws
 
 import (
+	"context"
 	"net/http"
 	"time"
 
-	awsv1 "github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
+	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 )
 
 // NewSession creates a new AWS session, optionally pointing to LocalStack if endpoint is provided.
-func NewSession(region string, localstackEndpoint string) (*session.Session, *awsv1.Config, error) {
-	cfg := &awsv1.Config{
-		Region:     awsv1.String(region),
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+func NewSession(region string, localstackEndpoint string) (awsv2.Config, error) {
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+
+	opts := []func(*config.LoadOptions) error{
+		config.WithRegion(region),
+		config.WithHTTPClient(httpClient),
 	}
 
 	if localstackEndpoint != "" {
-		cfg.Endpoint = awsv1.String(localstackEndpoint)
-		cfg.S3ForcePathStyle = awsv1.Bool(true)
-		cfg.Credentials = credentials.NewStaticCredentials("test", "test", "")
+		resolver := awsv2.EndpointResolverWithOptionsFunc(
+			func(service, region string, options ...any) (awsv2.Endpoint, error) {
+				return awsv2.Endpoint{
+					URL:               localstackEndpoint,
+					HostnameImmutable: true,
+				}, nil
+			},
+		)
+
+		opts = append(opts,
+			config.WithEndpointResolverWithOptions(resolver),
+			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
+		)
 	}
 
-	sess, err := session.NewSession(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	return sess, cfg, nil
+	return config.LoadDefaultConfig(context.Background(), opts...)
 }

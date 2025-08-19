@@ -8,12 +8,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodbstreams"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"go.uber.org/zap"
 
 	"aws_stuff/internal/aws"
@@ -35,17 +36,17 @@ func main() {
 	log, _ := logger.New(cfg.Environment)
 	defer log.Sync()
 
-	sess, baseCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
+	awsCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
 	if err != nil {
-		log.Fatal("aws session", zap.Error(err))
+		log.Fatal("failed to load aws config", zap.Error(err))
 	}
 
-	db := dynamodb.New(sess, baseCfg)
-	streams := dynamodbstreams.New(sess, baseCfg)
-	sqsClient := sqs.New(sess, baseCfg)
-	snsClient := sns.New(sess, baseCfg)
-	s3Client := s3.New(sess, baseCfg)
-	cwClient := cloudwatch.New(sess, baseCfg)
+	db := dynamodb.NewFromConfig(awsCfg)
+	streams := dynamodbstreams.NewFromConfig(awsCfg)
+	sqsClient := sqs.NewFromConfig(awsCfg)
+	snsClient := sns.NewFromConfig(awsCfg)
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) { o.UsePathStyle = true })
+	cwClient := cloudwatch.NewFromConfig(awsCfg)
 
 	processor := service.NewProcessorService(
 		log,
@@ -78,7 +79,7 @@ func main() {
 		return
 	}
 	shardID := *desc.StreamDescription.Shards[0].ShardId
-	iterator, err := streamsRepo.GetShardIterator(ctx, shardID, cfg.DynamoStreamARN, dynamodbstreams.ShardIteratorTypeTrimHorizon, "")
+	iterator, err := streamsRepo.GetShardIterator(ctx, shardID, cfg.DynamoStreamARN, string(types.ShardIteratorTypeTrimHorizon), "")
 	if err != nil {
 		log.Fatal("get shard iterator", zap.Error(err))
 	}
@@ -106,9 +107,9 @@ func main() {
 			// very simplified conversion: expect keys pk, sk, payload
 			img := r.Dynamodb.NewImage
 			item := models.Item{
-				PK:      awsString(img["pk"].S),
-				SK:      awsString(img["sk"].S),
-				Payload: awsString(img["payload"].S),
+				PK:      img["pk"].(*types.AttributeValueMemberS).Value,
+				SK:      img["sk"].(*types.AttributeValueMemberS).Value,
+				Payload: img["payload"].(*types.AttributeValueMemberS).Value,
 			}
 			b, _ := json.Marshal(item)
 			log.Info("stream record", zap.String("item", string(b)))

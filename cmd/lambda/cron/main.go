@@ -4,11 +4,11 @@ import (
 	"context"
 
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 
 	"aws_stuff/internal/aws"
 	"aws_stuff/internal/config"
@@ -29,18 +29,24 @@ func handler(ctx context.Context) error {
 	log, _ := logger.New(cfg.Environment)
 	defer log.Sync()
 
-	sess, baseCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
+	awsCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
 	if err != nil {
 		return err
 	}
 
+	dynamoClient := dynamodb.NewFromConfig(awsCfg)
+	sqsClient := sqs.NewFromConfig(awsCfg)
+	snsClient := sns.NewFromConfig(awsCfg)
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) { o.UsePathStyle = cfg.LocalstackEndpoint != "" })
+	cwClient := cloudwatch.NewFromConfig(awsCfg)
+
 	proc := service.NewProcessorService(
 		log,
-		repository.NewDynamoRepo(dynamodb.New(sess, baseCfg), cfg.DynamoTable, cfg.DynamoReplicaTable),
-		repository.NewSQSRepo(sqs.New(sess, baseCfg)),
-		repository.NewSNSRepo(sns.New(sess, baseCfg)),
-		repository.NewS3Repo(s3.New(sess, baseCfg)),
-		repository.NewCloudWatchRepo(cloudwatch.New(sess, baseCfg)),
+		repository.NewDynamoRepo(dynamoClient, cfg.DynamoTable, cfg.DynamoReplicaTable),
+		repository.NewSQSRepo(sqsClient),
+		repository.NewSNSRepo(snsClient),
+		repository.NewS3Repo(s3Client),
+		repository.NewCloudWatchRepo(cwClient),
 	)
 
 	return process(ctx, proc, cfg.CloudWatchNamespace)

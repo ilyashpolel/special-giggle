@@ -24,7 +24,7 @@ func Test_SaveItem_CountItems(t *testing.T) {
 		t.Fatalf("unexpected: %v", err)
 	}
 
-	dyn.EXPECT().ScanCount(gomock.Any()).Return(int64(5), nil)
+	dyn.EXPECT().ScanCount(gomock.Any()).Return(int32(5), nil)
 	n, err := svc.CountItems(context.Background())
 	if err != nil || n != 5 {
 		t.Fatalf("unexpected: %v %d", err, n)
