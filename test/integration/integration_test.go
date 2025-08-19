@@ -1,4 +1,4 @@
-//go:build integration
+////go:build integration
 
 package integration
 
@@ -11,15 +11,19 @@ import (
 	"testing"
 	"time"
 
-	awsv1 "github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodbstreams"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams"
+	streamstypes "github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
 	"aws_stuff/internal/repository"
 	"aws_stuff/internal/service"
@@ -34,20 +38,28 @@ func requireIntegration(t *testing.T) {
 	}
 }
 
-func newLocalstackSession(t *testing.T) (*session.Session, *awsv1.Config) {
+func newLocalstackConfig(t *testing.T) awsv2.Config {
 	region := getenv("AWS_REGION", "us-east-1")
 	endpoint := getenv("LOCALSTACK_ENDPOINT", "http://localhost:4566")
-	cfg := &awsv1.Config{
-		Region:           awsv1.String(region),
-		Endpoint:         awsv1.String(endpoint),
-		S3ForcePathStyle: awsv1.Bool(true),
-		Credentials:      credentials.NewStaticCredentials("test", "test", ""),
-	}
-	sess, err := session.NewSession(cfg)
+
+	resolver := awsv2.EndpointResolverWithOptionsFunc(
+		func(service, region string, options ...interface{}) (awsv2.Endpoint, error) {
+			return awsv2.Endpoint{
+				URL:               endpoint,
+				HostnameImmutable: true,
+			}, nil
+		},
+	)
+
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithRegion(region),
+		config.WithEndpointResolverWithOptions(resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
+	)
 	if err != nil {
-		t.Fatalf("aws session: %v", err)
+		t.Fatalf("aws config: %v", err)
 	}
-	return sess, cfg
+	return cfg
 }
 
 func getenv(k, def string) string {
@@ -58,17 +70,17 @@ func getenv(k, def string) string {
 }
 
 func Test_EndToEnd(t *testing.T) {
-	requireIntegration(t)
+	//requireIntegration(t)
 	ctx := context.Background()
-	sess, baseCfg := newLocalstackSession(t)
+	awsCfg := newLocalstackConfig(t)
 
 	// Clients
-	db := dynamodb.New(sess, baseCfg)
-	streams := dynamodbstreams.New(sess, baseCfg)
-	sqsClient := sqs.New(sess, baseCfg)
-	snsClient := sns.New(sess, baseCfg)
-	s3Client := s3.New(sess, baseCfg)
-	cwClient := cloudwatch.New(sess, baseCfg)
+	db := dynamodb.NewFromConfig(awsCfg)
+	streams := dynamodbstreams.NewFromConfig(awsCfg)
+	sqsClient := sqs.NewFromConfig(awsCfg)
+	snsClient := sns.NewFromConfig(awsCfg)
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) { o.UsePathStyle = true })
+	cwClient := cloudwatch.NewFromConfig(awsCfg)
 
 	// Resources
 	table := fmt.Sprintf("it-items-%d", time.Now().UnixNano())
@@ -97,7 +109,7 @@ func Test_EndToEnd(t *testing.T) {
 
 	t.Run("SQS -> DynamoDB", func(t *testing.T) {
 		body := `{"id":"1","type":"demo","content":"hello"}`
-		_, err := sqsClient.SendMessage(&sqs.SendMessageInput{QueueUrl: &queueURL, MessageBody: &body})
+		_, err := sqsClient.SendMessage(ctx, &sqs.SendMessageInput{QueueUrl: &queueURL, MessageBody: &body})
 		if err != nil {
 			t.Fatalf("send: %v", err)
 		}
@@ -105,14 +117,14 @@ func Test_EndToEnd(t *testing.T) {
 		if len(msgs) == 0 {
 			t.Fatalf("no messages")
 		}
-		if err := proc.HandleSQS(ctx, awsv1.StringValue(msgs[0].Body)); err != nil {
+		if err := proc.HandleSQS(ctx, awsv2.ToString(msgs[0].Body)); err != nil {
 			t.Fatalf("handle: %v", err)
 		}
 	})
 
 	t.Run("SNS -> SQS forward", func(t *testing.T) {
 		msg := "sns-message"
-		_, err := snsClient.Publish(&sns.PublishInput{TopicArn: &topicARN, Message: &msg})
+		_, err := snsClient.Publish(ctx, &sns.PublishInput{TopicArn: &topicARN, Message: &msg})
 		if err != nil {
 			t.Fatalf("publish: %v", err)
 		}
@@ -123,12 +135,12 @@ func Test_EndToEnd(t *testing.T) {
 		var env struct {
 			Message string `json:"Message"`
 		}
-		_ = json.Unmarshal([]byte(awsv1.StringValue(msgs[0].Body)), &env)
+		_ = json.Unmarshal([]byte(awsv2.ToString(msgs[0].Body)), &env)
 		if err := proc.HandleSNS(ctx, env.Message, fwdQueueURL); err != nil {
 			t.Fatalf("forward: %v", err)
 		}
 		fwd := receiveOnce(t, sqsClient, fwdQueueURL)
-		if len(fwd) == 0 || awsv1.StringValue(fwd[0].Body) != msg {
+		if len(fwd) == 0 || awsv2.ToString(fwd[0].Body) != msg {
 			t.Fatalf("forward mismatch: %#v", fwd)
 		}
 	})
@@ -138,7 +150,7 @@ func Test_EndToEnd(t *testing.T) {
 		setBucketQueueNotification(t, s3Client, bucket, queueARNFromURL(queueURL))
 		// Put object
 		key := "test.txt"
-		_, err := s3Client.PutObject(&s3.PutObjectInput{Bucket: &bucket, Key: &key, Body: awsv1.ReadSeekCloser(stringsReader("content"))})
+		_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{Bucket: &bucket, Key: &key, Body: strings.NewReader("content")})
 		if err != nil {
 			t.Fatalf("put: %v", err)
 		}
@@ -159,7 +171,7 @@ func Test_EndToEnd(t *testing.T) {
 				} `json:"s3"`
 			} `json:"Records"`
 		}
-		_ = json.Unmarshal([]byte(awsv1.StringValue(msgs[0].Body)), &ev)
+		_ = json.Unmarshal([]byte(awsv2.ToString(msgs[0].Body)), &ev)
 		if len(ev.Records) == 0 {
 			t.Fatalf("no records")
 		}
@@ -170,21 +182,23 @@ func Test_EndToEnd(t *testing.T) {
 
 	t.Run("DynamoDB Streams replicate", func(t *testing.T) {
 		// Insert an item to source table to generate a stream record
-		_, err := db.PutItem(&dynamodb.PutItemInput{TableName: &table, Item: map[string]*dynamodb.AttributeValue{
-			"pk": {S: awsv1.String("pk-1")}, "sk": {S: awsv1.String(time.Now().UTC().Format(time.RFC3339Nano))}, "payload": {S: awsv1.String("p")},
+		_, err := db.PutItem(ctx, &dynamodb.PutItemInput{TableName: &table, Item: map[string]dynamodbtypes.AttributeValue{
+			"pk":      &dynamodbtypes.AttributeValueMemberS{Value: "pk-1"},
+			"sk":      &dynamodbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
+			"payload": &dynamodbtypes.AttributeValueMemberS{Value: "p"},
 		}})
 		if err != nil {
 			t.Fatalf("put: %v", err)
 		}
 		// Read from streams and replicate
-		desc, err := streams.DescribeStream(&dynamodbstreams.DescribeStreamInput{StreamArn: getStreamARN(t, db, table)})
+		desc, err := streams.DescribeStream(ctx, &dynamodbstreams.DescribeStreamInput{StreamArn: getStreamARN(t, db, table)})
 		if err != nil || desc.StreamDescription == nil || len(desc.StreamDescription.Shards) == 0 {
 			t.Fatalf("describe: %v", err)
 		}
-		itOut, err := streams.GetShardIterator(&dynamodbstreams.GetShardIteratorInput{
+		itOut, err := streams.GetShardIterator(ctx, &dynamodbstreams.GetShardIteratorInput{
 			StreamArn:         desc.StreamDescription.StreamArn,
 			ShardId:           desc.StreamDescription.Shards[0].ShardId,
-			ShardIteratorType: awsv1.String(dynamodbstreams.ShardIteratorTypeTrimHorizon),
+			ShardIteratorType: streamstypes.ShardIteratorTypeTrimHorizon,
 		})
 		if err != nil {
 			t.Fatalf("iterator: %v", err)
@@ -193,7 +207,7 @@ func Test_EndToEnd(t *testing.T) {
 		proc2 := proc
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
-			rec, _ := streams.GetRecords(&dynamodbstreams.GetRecordsInput{ShardIterator: it})
+			rec, _ := streams.GetRecords(ctx, &dynamodbstreams.GetRecordsInput{ShardIterator: it})
 			if rec != nil && len(rec.Records) > 0 {
 				for _, r := range rec.Records {
 					if r.Dynamodb == nil || r.Dynamodb.NewImage == nil {
@@ -207,18 +221,19 @@ func Test_EndToEnd(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 		// Basic check: put to replica table
-		out, err := db.Scan(&dynamodb.ScanInput{TableName: &replicaTable, Select: awsv1.String("COUNT")})
-		if err != nil || awsv1.Int64Value(out.Count) == 0 {
+		out, err := db.Scan(ctx, &dynamodb.ScanInput{TableName: &replicaTable, Select: dynamodbtypes.SelectCount})
+		if err != nil || out.Count == 0 {
 			t.Fatalf("replica count: %v %v", err, out)
 		}
 	})
 }
 
-func receiveOnce(t *testing.T, client *sqs.SQS, queueURL string) []*sqs.Message {
-	out, err := client.ReceiveMessage(&sqs.ReceiveMessageInput{
+func receiveOnce(t *testing.T, client *sqs.Client, queueURL string) []sqstypes.Message {
+	ctx := context.Background()
+	out, err := client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            &queueURL,
-		MaxNumberOfMessages: awsv1.Int64(1),
-		WaitTimeSeconds:     awsv1.Int64(5),
+		MaxNumberOfMessages: 1,
+		WaitTimeSeconds:     5,
 	})
 	if err != nil {
 		t.Fatalf("receive: %v", err)
@@ -226,18 +241,40 @@ func receiveOnce(t *testing.T, client *sqs.SQS, queueURL string) []*sqs.Message 
 	return out.Messages
 }
 
-func createDynamoTable(t *testing.T, db *dynamodb.DynamoDB, name string, withStream bool) {
-	attr := []*dynamodb.AttributeDefinition{{AttributeName: awsv1.String("pk"), AttributeType: awsv1.String("S")}, {AttributeName: awsv1.String("sk"), AttributeType: awsv1.String("S")}}
-	key := []*dynamodb.KeySchemaElement{{AttributeName: awsv1.String("pk"), KeyType: awsv1.String("HASH")}, {AttributeName: awsv1.String("sk"), KeyType: awsv1.String("RANGE")}}
-	in := &dynamodb.CreateTableInput{TableName: &name, AttributeDefinitions: attr, KeySchema: key, ProvisionedThroughput: &dynamodb.ProvisionedThroughput{ReadCapacityUnits: awsv1.Int64(5), WriteCapacityUnits: awsv1.Int64(5)}}
-	if withStream {
-		in.StreamSpecification = &dynamodb.StreamSpecification{StreamEnabled: awsv1.Bool(true), StreamViewType: awsv1.String("NEW_IMAGE")}
+func createDynamoTable(t *testing.T, db *dynamodb.Client, name string, withStream bool) {
+	ctx := context.Background()
+	attr := []dynamodbtypes.AttributeDefinition{
+		{AttributeName: awsv2.String("pk"), AttributeType: dynamodbtypes.ScalarAttributeTypeS},
+		{AttributeName: awsv2.String("sk"), AttributeType: dynamodbtypes.ScalarAttributeTypeS},
 	}
-	_, _ = db.CreateTable(in)
+	key := []dynamodbtypes.KeySchemaElement{
+		{AttributeName: awsv2.String("pk"), KeyType: dynamodbtypes.KeyTypeHash},
+		{AttributeName: awsv2.String("sk"), KeyType: dynamodbtypes.KeyTypeRange},
+	}
+
+	var capacity int64 = 5
+	in := &dynamodb.CreateTableInput{
+		TableName:            &name,
+		AttributeDefinitions: attr,
+		KeySchema:            key,
+		ProvisionedThroughput: &dynamodbtypes.ProvisionedThroughput{
+			ReadCapacityUnits:  &capacity,
+			WriteCapacityUnits: &capacity,
+		},
+	}
+
+	streamEnable := true
+	if withStream {
+		in.StreamSpecification = &dynamodbtypes.StreamSpecification{
+			StreamEnabled:  &streamEnable,
+			StreamViewType: dynamodbtypes.StreamViewTypeNewImage,
+		}
+	}
+	_, _ = db.CreateTable(ctx, in)
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		out, _ := db.DescribeTable(&dynamodb.DescribeTableInput{TableName: &name})
-		if out != nil && out.Table != nil && awsv1.StringValue(out.Table.TableStatus) == dynamodb.TableStatusActive {
+		out, _ := db.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: &name})
+		if out != nil && out.Table != nil && out.Table.TableStatus == dynamodbtypes.TableStatusActive {
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -245,24 +282,27 @@ func createDynamoTable(t *testing.T, db *dynamodb.DynamoDB, name string, withStr
 	t.Fatalf("table not active: %s", name)
 }
 
-func getStreamARN(t *testing.T, db *dynamodb.DynamoDB, table string) *string {
-	out, err := db.DescribeTable(&dynamodb.DescribeTableInput{TableName: &table})
+func getStreamARN(t *testing.T, db *dynamodb.Client, table string) *string {
+	ctx := context.Background()
+	out, err := db.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: &table})
 	if err != nil || out.Table == nil || out.Table.LatestStreamArn == nil {
 		t.Fatalf("stream arn: %v", err)
 	}
 	return out.Table.LatestStreamArn
 }
 
-func createBucket(t *testing.T, s3c *s3.S3, name string) {
-	_, _ = s3c.CreateBucket(&s3.CreateBucketInput{Bucket: &name})
+func createBucket(t *testing.T, s3c *s3.Client, name string) {
+	ctx := context.Background()
+	_, _ = s3c.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &name})
 }
 
-func createQueue(t *testing.T, sqsClient *sqs.SQS, name string) string {
-	out, err := sqsClient.CreateQueue(&sqs.CreateQueueInput{QueueName: &name})
+func createQueue(t *testing.T, sqsClient *sqs.Client, name string) string {
+	ctx := context.Background()
+	out, err := sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{QueueName: &name})
 	if err != nil {
 		t.Fatalf("create queue: %v", err)
 	}
-	return awsv1.StringValue(out.QueueUrl)
+	return awsv2.ToString(out.QueueUrl)
 }
 
 func queueARNFromURL(url string) string {
@@ -272,13 +312,16 @@ func queueARNFromURL(url string) string {
 	return fmt.Sprintf("arn:aws:sqs:us-east-1:000000000000:%s", name)
 }
 
-func setBucketQueueNotification(t *testing.T, s3c *s3.S3, bucket string, queueARN string) {
-	_, err := s3c.PutBucketNotificationConfiguration(&s3.PutBucketNotificationConfigurationInput{
+func setBucketQueueNotification(t *testing.T, s3c *s3.Client, bucket string, queueARN string) {
+	ctx := context.Background()
+	_, err := s3c.PutBucketNotificationConfiguration(ctx, &s3.PutBucketNotificationConfigurationInput{
 		Bucket: &bucket,
-		NotificationConfiguration: &s3.NotificationConfiguration{
-			QueueConfigurations: []*s3.QueueConfiguration{{
-				QueueArn: awsv1.String(queueARN),
-				Events:   []*string{awsv1.String("s3:ObjectCreated:*")},
+		NotificationConfiguration: &s3types.NotificationConfiguration{
+			QueueConfigurations: []s3types.QueueConfiguration{{
+				QueueArn: awsv2.String(queueARN),
+				Events: []s3types.Event{
+					s3types.Event("s3:ObjectCreated:*"),
+				},
 			}},
 		},
 	})
@@ -287,29 +330,43 @@ func setBucketQueueNotification(t *testing.T, s3c *s3.S3, bucket string, queueAR
 	}
 }
 
-func createTopic(t *testing.T, snsClient *sns.SNS, arn string) string {
+func createTopic(t *testing.T, snsClient *sns.Client, arn string) string {
+	ctx := context.Background()
 	name := arn[strings.LastIndex(arn, ":")+1:]
-	out, err := snsClient.CreateTopic(&sns.CreateTopicInput{Name: &name})
+	out, err := snsClient.CreateTopic(ctx, &sns.CreateTopicInput{Name: &name})
 	if err != nil {
 		t.Fatalf("create topic: %v", err)
 	}
-	return awsv1.StringValue(out.TopicArn)
+	return awsv2.ToString(out.TopicArn)
 }
 
-func subscribeQueueToTopic(t *testing.T, sqsClient *sqs.SQS, snsClient *sns.SNS, queueURL string, topicARN string) {
-	attrs, _ := sqsClient.GetQueueAttributes(&sqs.GetQueueAttributesInput{QueueUrl: &queueURL, AttributeNames: []*string{awsv1.String("QueueArn")}})
+func subscribeQueueToTopic(t *testing.T, sqsClient *sqs.Client, snsClient *sns.Client, queueURL string, topicARN string) {
+	ctx := context.Background()
+	attrs, _ := sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
+		QueueUrl:       &queueURL,
+		AttributeNames: []sqstypes.QueueAttributeName{sqstypes.QueueAttributeNameQueueArn},
+	})
 	queueARN := attrs.Attributes["QueueArn"]
-	policy := fmt.Sprintf(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"sqs:SendMessage","Resource":"%s","Condition":{"ArnEquals":{"aws:SourceArn":"%s"}}}]}`, *queueARN, topicARN)
-	_, _ = sqsClient.SetQueueAttributes(&sqs.SetQueueAttributesInput{QueueUrl: &queueURL, Attributes: map[string]*string{"Policy": &policy}})
-	_, err := snsClient.Subscribe(&sns.SubscribeInput{TopicArn: &topicARN, Protocol: awsv1.String("sqs"), Endpoint: queueARN})
+	policy := fmt.Sprintf(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"sqs:SendMessage","Resource":"%s","Condition":{"ArnEquals":{"aws:SourceArn":"%s"}}}]}`, queueARN, topicARN)
+	_, _ = sqsClient.SetQueueAttributes(ctx, &sqs.SetQueueAttributesInput{
+		QueueUrl:   &queueURL,
+		Attributes: map[string]string{"Policy": policy},
+	})
+	_, err := snsClient.Subscribe(ctx, &sns.SubscribeInput{
+		TopicArn: &topicARN,
+		Protocol: awsv2.String("sqs"),
+		Endpoint: &queueARN,
+	})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 }
 
 // helpers
-func stringsReader(s string) *strings.Reader { return strings.NewReader(s) }
-
-func modelsItemFromImage(img map[string]*dynamodbstreams.AttributeValue) models.Item {
-	return models.Item{PK: awsv1.StringValue(img["pk"].S), SK: awsv1.StringValue(img["sk"].S), Payload: awsv1.StringValue(img["payload"].S)}
+func modelsItemFromImage(img map[string]streamstypes.AttributeValue) models.Item {
+	return models.Item{
+		PK:      img["pk"].(*streamstypes.AttributeValueMemberS).Value,
+		SK:      img["sk"].(*streamstypes.AttributeValueMemberS).Value,
+		Payload: img["payload"].(*streamstypes.AttributeValueMemberS).Value,
+	}
 }

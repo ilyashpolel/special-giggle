@@ -6,11 +6,11 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sns"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"go.uber.org/zap"
 
 	"aws_stuff/internal/aws"
@@ -38,18 +38,18 @@ func handler(ctx context.Context, event events.S3Event) error {
 	log, _ := logger.New(cfg.Environment)
 	defer log.Sync()
 
-	sess, baseCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
+	awsCfg, err := aws.NewSession(cfg.AWSRegion, cfg.LocalstackEndpoint)
 	if err != nil {
 		return err
 	}
 
 	proc := service.NewProcessorService(
 		log,
-		repository.NewDynamoRepo(dynamodb.New(sess, baseCfg), cfg.DynamoTable, cfg.DynamoReplicaTable),
-		repository.NewSQSRepo(sqs.New(sess, baseCfg)),
-		repository.NewSNSRepo(sns.New(sess, baseCfg)),
-		repository.NewS3Repo(s3.New(sess, baseCfg)),
-		repository.NewCloudWatchRepo(cloudwatch.New(sess, baseCfg)),
+		repository.NewDynamoRepo(dynamodb.NewFromConfig(awsCfg), cfg.DynamoTable, cfg.DynamoReplicaTable),
+		repository.NewSQSRepo(sqs.NewFromConfig(awsCfg)),
+		repository.NewSNSRepo(sns.NewFromConfig(awsCfg)),
+		repository.NewS3Repo(s3.NewFromConfig(awsCfg, func(o *s3.Options) { o.UsePathStyle = cfg.LocalstackEndpoint != "" })),
+		repository.NewCloudWatchRepo(cloudwatch.NewFromConfig(awsCfg)),
 	)
 
 	return process(ctx, proc, event, log)

@@ -8,7 +8,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sqs "github.com/aws/aws-sdk-go/service/sqs"
+	types "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	gomock "github.com/golang/mock/gomock"
 )
 
@@ -50,10 +50,10 @@ func (mr *MockSQSRepositoryMockRecorder) Delete(arg0, arg1, arg2 interface{}) *g
 }
 
 // Receive mocks base method.
-func (m *MockSQSRepository) Receive(arg0 context.Context, arg1 string, arg2, arg3, arg4 int32) ([]*sqs.Message, error) {
+func (m *MockSQSRepository) Receive(arg0 context.Context, arg1 string, arg2, arg3, arg4 int32) ([]types.Message, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Receive", arg0, arg1, arg2, arg3, arg4)
-	ret0, _ := ret[0].([]*sqs.Message)
+	ret0, _ := ret[0].([]types.Message)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
